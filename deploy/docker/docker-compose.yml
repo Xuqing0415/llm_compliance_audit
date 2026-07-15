@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  llm-audit-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: llm-audit-gateway
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      - CONFIG_PATH=/app/configs/config.yaml
+    volumes:
+      - ./configs/config.yaml:/app/configs/config.yaml
+      - ./logs:/app/logs
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+networks:
+  llm-network:
+    driver: bridge

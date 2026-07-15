@@ -1,0 +1,163 @@
+exemptions:
+  - rule_name: "身份证号"
+    keywords:
+      - case_id
+      - task_number
+      - ticket_id
+      - order_id
+      - reference_id
+      - tracking_id
+      - test_id
+      - mock_id
+  - rule_name: "手机号"
+    keywords:
+      - case_id
+      - task_number
+      - ticket_id
+      - order_id
+      - reference_id
+      - tracking_id
+      - phone_type
+      - contact_type
+      - test_phone
+      - mock_phone
+  - rule_name: "邮箱"
+    keywords:
+      - email_type
+      - contact_email
+      - sender_email
+      - recipient_email
+      - test_email
+      - mock_email
+  - rule_name: "银行卡号"
+    keywords:
+      - bank_id
+      - account_id
+      - transaction_id
+      - test_card
+      - mock_card
+  - rule_name: "IP地址"
+    keywords:
+      - server_ip
+      - host_ip
+      - gateway_ip
+      - test_ip
+      - mock_ip
+  - rule_name: "URL"
+    keywords:
+      - redirect_url
+      - callback_url
+      - test_url
+      - mock_url
+
+false_positives:
+  - rule_name: "手机号"
+    patterns:
+      - "^12345678901$"
+      - "^11111111111$"
+      - "^12312312312$"
+      - "^00000000000$"
+      - "^13800138000$"
+      - "^13900139000$"
+      - "^13700137000$"
+      - "\\bphone\\s*=\\s*\"1[3-9]\\d{9}\""
+      - "\\bphone\\s*[:=]\\s*1[3-9]\\d{9}"
+      - "\\btestPhone\\s*[:=]"
+      - "\\bmockPhone\\s*[:=]"
+      - "\\buserPhone\\s*[:=]"
+  - rule_name: "身份证号"
+    patterns:
+      - "^110101199003072345$"
+      - "^110101199001011234$"
+      - "\\bid\\s*=\\s*\"[1-9]\\d{17}[\\dXx]\""
+      - "\\buserId\\s*[:=]"
+      - "\\btestId\\s*[:=]"
+      - "\\bmockId\\s*[:=]"
+      - "\\bcaseId\\s*[:=]"
+  - rule_name: "银行卡号"
+    patterns:
+      - "^1234567812345678$"
+      - "^0000000000000000$"
+      - "\\bcard\\s*=\\s*\"\\d{16,19}\""
+      - "\\baccount\\s*[:=]\\s*\\d{16,19}"
+      - "\\btestCard\\s*[:=]"
+      - "\\bmockCard\\s*[:=]"
+  - rule_name: "邮箱"
+    patterns:
+      - "^test@example\\.com$"
+      - "^user@test\\.com$"
+      - "^admin@local\\.host$"
+      - "\\bemail\\s*=\\s*\"[^\"]+@[^\"]+\""
+      - "\\buserEmail\\s*[:=]"
+      - "\\btestEmail\\s*[:=]"
+      - "\\bmockEmail\\s*[:=]"
+  - rule_name: "IP地址"
+    patterns:
+      - "^127\\.0\\.0\\.1$"
+      - "^localhost$"
+      - "^0\\.0\\.0\\.0$"
+      - "^192\\.168\\.1\\.1$"
+      - "^10\\.0\\.0\\.1$"
+      - "\\bhost\\s*=\\s*\"\\d+\\.\\d+\\.\\d+\\.\\d+\""
+      - "\\bserverIp\\s*[:=]"
+      - "\\blocalhost\\b"
+  - rule_name: "URL"
+    patterns:
+      - "^http://localhost"
+      - "^http://127\\.0\\.0\\.1"
+      - "^https://example\\.com"
+      - "\\burl\\s*=\\s*\"https?://[^\"]+\""
+      - "\\bapiUrl\\s*[:=]"
+      - "\\btestUrl\\s*[:=]"
+      - "\\bmockUrl\\s*[:=]"
+  - rule_name: "命令注入"
+    patterns:
+      - "\\bconsole\\.log\\(\"[^\"]+\"\\)"
+      - "\\bconsole\\.error\\(\"[^\"]+\"\\)"
+      - "\\bconsole\\.warn\\(\"[^\"]+\"\\)"
+      - "\\bprint\\(\"[^\"]+\"\\)"
+      - "\\bsys\\.out\\.println\\(\"[^\"]+\"\\)"
+  - rule_name: "SQL注入"
+    patterns:
+      - "\\bsql\\s*=\\s*\"SELECT \\* FROM\""
+      - "\\bsql\\s*=\\s*\"INSERT INTO\""
+      - "\\bquery\\s*=\\s*\"SELECT\""
+      - "\\bpreparedStatement\\s*="
+  - rule_name: "全库导出"
+    patterns:
+      - "\\bexport_all_fields\\b"
+      - "\\bexport_all_records\\b"
+      - "\\bexport_all_data\\b"
+      - "\\bget_all_records\\b"
+      - "\\bfetch_all_data\\b"
+      - "\\bSELECT \\* FROM users\\b"
+      - "\\bSELECT \\* FROM orders\\b"
+      - "\\bexport_all_columns\\b"
+  - rule_name: "批量超阈值"
+    patterns:
+      - "\\blimit\\s*=\\s*1000\\b"
+      - "\\bcount\\s*=\\s*1000\\b"
+      - "\\bsize\\s*=\\s*1000\\b"
+      - "\\bpage_size\\s*=\\s*1000\\b"
+      - "\\boffset\\s*=\\s*\\d+"
+      - "\\bpage\\s*=\\s*\\d+"
+  - rule_name: "密钥泄露导出"
+    patterns:
+      - "\\bget_password\\b"
+      - "\\bset_password\\b"
+      - "\\bupdate_password\\b"
+      - "\\bpassword_hash\\b"
+      - "\\bpassword_reset\\b"
+      - "\\bapi_key\\s*=\\s*\"[^\"]+\""
+      - "\\bsecret_key\\s*=\\s*\"[^\"]+\""
+      - "\\baccess_token\\s*=\\s*\"[^\"]+\""
+  - rule_name: "全库导出"
+    patterns:
+      - "\\/\\/\\s*export\\s+all\\s+fields"
+      - "\\/\\/\\s*export\\s+all\\s+records"
+      - "\\/\\/\\s*export\\s+all\\s+data"
+      - "\\#\\s*export\\s+all\\s+fields"
+      - "\\*\\s*export\\s+all\\s+fields\\s*\\*"
+      - "\\/\\*\\s*export\\s+all\\s+\\*\\/"
+      - "\\bexport_all_fields\\s*=\\s*true"
+      - "\\bexport_all_columns\\s*=\\s*true"
