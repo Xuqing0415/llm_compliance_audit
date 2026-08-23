@@ -35,7 +35,10 @@ func NewServer(cfg *config.Config, proxyHandler *proxy.ProxyHandler) *Server {
 		proxyHandler.ServeHTTP(c)
 	})
 
-	engine.Any("/*path", func(c *gin.Context) {
+	// NoRoute proxies every other path to the upstream without registering a
+	// catch-all route, which would conflict with the static /v1/* routes above
+	// and panic gin at startup.
+	engine.NoRoute(func(c *gin.Context) {
 		proxyHandler.ServeHTTP(c)
 	})
 

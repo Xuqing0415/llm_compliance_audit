@@ -5,7 +5,7 @@ import (
 )
 
 type SlidingWindow struct {
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	buffer         []rune
 	maxSize        int
 	flushThreshold int
@@ -40,15 +40,15 @@ func (sw *SlidingWindow) Append(content string) {
 }
 
 func (sw *SlidingWindow) GetCurrentBuffer() string {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
 
 	return string(sw.buffer)
 }
 
 func (sw *SlidingWindow) GetUnflushedBuffer() string {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
 
 	if sw.flushOffset >= len(sw.buffer) {
 		return ""
@@ -58,8 +58,8 @@ func (sw *SlidingWindow) GetUnflushedBuffer() string {
 }
 
 func (sw *SlidingWindow) GetFlushedContent() string {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
 
 	if sw.flushOffset == 0 {
 		return ""
@@ -72,11 +72,11 @@ func (sw *SlidingWindow) Flush() (string, bool) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 
-	if len(sw.buffer) - sw.flushOffset < sw.flushThreshold {
+	if len(sw.buffer)-sw.flushOffset < sw.flushThreshold {
 		return "", false
 	}
 
-	toFlush := sw.buffer[sw.flushOffset:sw.flushOffset+sw.flushThreshold]
+	toFlush := sw.buffer[sw.flushOffset : sw.flushOffset+sw.flushThreshold]
 	sw.flushOffset += sw.flushThreshold
 
 	return string(toFlush), true
@@ -93,15 +93,15 @@ func (sw *SlidingWindow) FlushAll() string {
 }
 
 func (sw *SlidingWindow) Size() int {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
 
 	return len(sw.buffer)
 }
 
 func (sw *SlidingWindow) UnflushedSize() int {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
 
 	return len(sw.buffer) - sw.flushOffset
 }

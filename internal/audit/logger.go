@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,23 +20,23 @@ import (
 )
 
 type AuditLogger struct {
-	config           *config.Config
-	logDir           string
-	buffer           chan *types.RequestContext
-	wg               sync.WaitGroup
-	stopChan         chan bool
-	mu               sync.RWMutex
-	previousHash     string
-	hashMu           sync.RWMutex
+	config            *config.Config
+	logDir            string
+	buffer            chan *types.RequestContext
+	wg                sync.WaitGroup
+	stopChan          chan bool
+	mu                sync.RWMutex
+	previousHash      string
+	hashMu            sync.RWMutex
 	diskUsageExceeded bool
-	diskMu           sync.RWMutex
+	diskMu            sync.RWMutex
 	sessionAggregator *sessionAggregator
 }
 
 type sessionAggregator struct {
-	mu         sync.RWMutex
-	sessions   map[string]*sessionState
-	timeout    time.Duration
+	mu            sync.RWMutex
+	sessions      map[string]*sessionState
+	timeout       time.Duration
 	cleanupTicker *time.Ticker
 }
 
@@ -55,8 +56,8 @@ type sessionState struct {
 
 func newSessionAggregator(timeout time.Duration) *sessionAggregator {
 	sa := &sessionAggregator{
-		sessions:   make(map[string]*sessionState),
-		timeout:    timeout,
+		sessions: make(map[string]*sessionState),
+		timeout:  timeout,
 	}
 
 	sa.cleanupTicker = time.NewTicker(timeout / 2)
@@ -173,10 +174,10 @@ func (sa *sessionAggregator) Close() {
 
 func NewAuditLogger(cfg *config.Config) (*AuditLogger, error) {
 	logger := &AuditLogger{
-		config:           cfg,
-		logDir:           "logs/audit",
-		buffer:           make(chan *types.RequestContext, 1000),
-		stopChan:         make(chan bool),
+		config:            cfg,
+		logDir:            "logs/audit",
+		buffer:            make(chan *types.RequestContext, 1000),
+		stopChan:          make(chan bool),
 		sessionAggregator: newSessionAggregator(5 * time.Minute),
 	}
 
@@ -434,15 +435,14 @@ func (al *AuditLogger) QueryByTraceID(traceID string) (*SessionLogEntry, error) 
 			continue
 		}
 
-		lines := strings.Split(string(data), "\n")
-		for j := len(lines) - 1; j >= 0; j-- {
-			if lines[j] == "" {
-				continue
-			}
-
+		// Log entries are written as (possibly indented) JSON objects. Use a
+		// streaming decoder so each object is parsed correctly regardless of
+		// formatting/newlines, rather than splitting by line.
+		dec := json.NewDecoder(bytes.NewReader(data))
+		for dec.More() {
 			var entry SessionLogEntry
-			if err := json.Unmarshal([]byte(lines[j]), &entry); err != nil {
-				continue
+			if err := dec.Decode(&entry); err != nil {
+				break
 			}
 
 			if entry.SessionID == traceID || entry.RequestID == traceID {

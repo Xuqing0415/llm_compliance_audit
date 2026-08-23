@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -36,15 +37,16 @@ func (pr *peekReader) Read(p []byte) (int, error) {
 }
 
 type ProxyHandler struct {
-	proxy         *httputil.ReverseProxy
-	upstreamURL   *url.URL
-	config        *config.Config
-	mu            sync.RWMutex
-	detectionFunc func(ctx context.Context, request *types.RequestContext) (*types.DetectionResult, error)
+	proxy            *httputil.ReverseProxy
+	upstreamURL      *url.URL
+	config           *config.Config
+	mu               sync.RWMutex
+	detectionFunc    func(ctx context.Context, request *types.RequestContext) (*types.DetectionResult, error)
 	streamDetectFunc func(ctx context.Context, accumulatedText string, request *types.RequestContext) (*types.DetectionResult, error)
-	auditFunc     func(ctx context.Context, request *types.RequestContext) error
-	bypassMode    bool
-	bypassMu      sync.RWMutex
+	auditFunc        func(ctx context.Context, request *types.RequestContext) error
+	bypassMode       bool
+	bypassMu         sync.RWMutex
+	streamHTTPClient *http.Client
 }
 
 func NewProxyHandler(cfg *config.Config) (*ProxyHandler, error) {
@@ -56,6 +58,14 @@ func NewProxyHandler(cfg *config.Config) (*ProxyHandler, error) {
 	ph := &ProxyHandler{
 		upstreamURL: upstreamURL,
 		config:      cfg,
+		streamHTTPClient: &http.Client{
+			Timeout: time.Duration(cfg.Upstream.Timeout) * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        cfg.Upstream.MaxConnections,
+				MaxIdleConnsPerHost: cfg.Upstream.MaxConnections,
+				IdleConnTimeout:     30 * time.Second,
+			},
+		},
 	}
 
 	ph.proxy = &httputil.ReverseProxy{
@@ -100,6 +110,19 @@ func (ph *ProxyHandler) UpdateConfig(cfg *config.Config) error {
 		MaxIdleConns:        cfg.Upstream.MaxConnections,
 		MaxIdleConnsPerHost: cfg.Upstream.MaxConnections,
 		IdleConnTimeout:     30 * time.Second,
+	}
+
+	oldClient := ph.streamHTTPClient
+	ph.streamHTTPClient = &http.Client{
+		Timeout: time.Duration(cfg.Upstream.Timeout) * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        cfg.Upstream.MaxConnections,
+			MaxIdleConnsPerHost: cfg.Upstream.MaxConnections,
+			IdleConnTimeout:     30 * time.Second,
+		},
+	}
+	if oldClient != nil {
+		oldClient.CloseIdleConnections()
 	}
 
 	return nil
@@ -215,7 +238,6 @@ func (ph *ProxyHandler) director(req *http.Request) {
 	req.URL.Scheme = ph.upstreamURL.Scheme
 	req.URL.Host = ph.upstreamURL.Host
 	req.URL.Path = ph.upstreamURL.Path + req.URL.Path
-	req.URL.RawQuery = req.URL.RawQuery
 
 	req.Header.Set("Host", ph.upstreamURL.Host)
 
@@ -396,7 +418,8 @@ func (ph *ProxyHandler) handleNormal(c *gin.Context, reqCtx *types.RequestContex
 
 type responseWriter struct {
 	http.ResponseWriter
-	body *bytes.Buffer
+	body       *bytes.Buffer
+	statusCode int
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
@@ -404,8 +427,16 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+func (w *responseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
 func (w *responseWriter) Status() int {
-	return http.StatusOK
+	if w.statusCode == 0 {
+		return http.StatusOK
+	}
+	return w.statusCode
 }
 
 func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContext) {
@@ -414,9 +445,10 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 	streamCfg := ph.config.Detection.Stream
 	auditOnly := ph.config.Detection.AuditOnlyMode
 	policy := reqCtx.ExecutionPolicy
+	client := ph.streamHTTPClient
 	ph.mu.RUnlock()
 
-	fullURL := upstreamURL.String() + reqCtx.Path
+	fullURL := upstreamURL.JoinPath(reqCtx.Path).String()
 
 	upstreamReq, err := http.NewRequest(reqCtx.Method, fullURL, bytes.NewBufferString(reqCtx.RequestBody))
 	if err != nil {
@@ -433,15 +465,6 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 		upstreamReq.Header.Set(k, v)
 	}
 
-	client := &http.Client{
-		Timeout: time.Duration(ph.config.Upstream.Timeout) * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        ph.config.Upstream.MaxConnections,
-			MaxIdleConnsPerHost: ph.config.Upstream.MaxConnections,
-			IdleConnTimeout:     30 * time.Second,
-		},
-	}
-
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
 		logrus.Error("Failed to connect to upstream:", err)
@@ -450,13 +473,12 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 	}
 	defer resp.Body.Close()
 
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Transfer-Encoding", "chunked")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Flush()
+	for k, v := range resp.Header {
+		c.Writer.Header()[k] = v
+	}
 
 	if ph.IsBypassMode() || !reqCtx.ResponseScanningEnabled {
+		c.Writer.WriteHeader(resp.StatusCode)
 		io.Copy(c.Writer, resp.Body)
 		c.Writer.Flush()
 		reqCtx.StatusCode = resp.StatusCode
@@ -468,6 +490,7 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 	peekN, err := resp.Body.Read(peekBuffer)
 	if err != nil && err != io.EOF {
 		logrus.Error("Failed to peek response body:", err)
+		c.Writer.WriteHeader(resp.StatusCode)
 		io.Copy(c.Writer, resp.Body)
 		c.Writer.Flush()
 		reqCtx.StatusCode = resp.StatusCode
@@ -479,11 +502,7 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 
 	if !isSSEFormat {
 		logrus.Warnf("Response is not SSE format (path=%s), falling back to direct passthrough", c.Request.URL.Path)
-		c.Writer.Header().Del("Content-Type")
-		c.Writer.Header().Del("Transfer-Encoding")
-		c.Writer.Header().Del("Cache-Control")
-		c.Writer.Header().Del("Connection")
-
+		c.Writer.WriteHeader(resp.StatusCode)
 		c.Writer.Write(peekBuffer[:peekN])
 		io.Copy(c.Writer, resp.Body)
 		c.Writer.Flush()
@@ -491,6 +510,19 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 		reqCtx.Complete()
 		return
 	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	// The upstream response carries a Content-Length header, which conflicts
+	// with the chunked Transfer-Encoding we set for streaming. Drop it so the
+	// client does not truncate the body at the original length (this previously
+	// caused streamed block/termination notices to be lost).
+	c.Writer.Header().Del("Content-Length")
+	c.Writer.Header().Del("Content-Encoding")
+	c.Writer.WriteHeader(resp.StatusCode)
+	c.Writer.Flush()
 
 	resp.Body = &peekReader{ReadCloser: resp.Body, buf: peekBuffer[:peekN]}
 
@@ -596,10 +628,14 @@ func (ph *ProxyHandler) handleStream(c *gin.Context, reqCtx *types.RequestContex
 }
 
 func escapeJSON(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	s = strings.ReplaceAll(s, "\t", "\\t")
-	return s
+	b, err := json.Marshal(s)
+	if err != nil {
+		return s
+	}
+	// json.Marshal returns a quoted string like "content", strip the surrounding quotes
+	raw := string(b)
+	if len(raw) >= 2 {
+		return raw[1 : len(raw)-1]
+	}
+	return raw
 }
