@@ -1,0 +1,114 @@
+# Prometheus 告警规则 —— LLM Audit Gateway v0.1.0
+#
+# 加载方式：把本文件挂到 Prometheus 的 rules 目录（如 prometheus.yml 中
+# rule_files: ["/etc/prometheus/rules/*.yml"]）。
+#
+# 指标说明（与代码现状一致，避免引用不存在的业务指标）：
+#   - v0.1.0 的 /metrics（:8080 与 :9090）只导出 go_*/process_*/promhttp_*
+#     运行时指标，业务计数器（拦截量、P99 等）尚未内置。
+#   - 业务信号当前来自 /admin/stats（JSON）与审计日志；
+#     接入方案见 docs/production-deployment-guide.md 第 6.2 节（textfile 采集）。
+#   - 组 "business.*" 内的规则默认被注释：等 textfile collector 或 v0.2.0
+#     内置指标提供同名序列后再启用。
+#
+# 需要先替换的占位符：
+#   - job="gateway"：改成你 Scrape 配置里的 job 名（本仓库 K8s 注解发现时
+#     建议分别命名 gateway-main / gateway-admin，或统一为 gateway 后调整规则）。
+
+groups:
+  - name: llm-audit-gateway.runtime
+    rules:
+      # 主服务或管理面连续 1 分钟抓不到 => 实例宕机/探活失败
+      - alert: GatewayInstanceDown
+        expr: |
+          up{job="gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM Audit Gateway 实例不可达"
+          description: "Prometheus 无法抓取 job={{ $labels.job }} instance={{ $labels.instance }} 超过 1 分钟。请检查 Pod 状态、Service/Endpoints 与网络策略。"
+          runbook: "见 docs/production-deployment-guide.md 第 9 节（日常巡检与排障）。"
+
+      # 进程常驻内存持续超过 1GiB => 检查是否有超大非流式响应或流式窗口过大
+      # 说明：若部署带容器内存限额，推荐优先用容器指标
+      # （container_memory_working_set_bytes{container="llm-audit-gateway"}），
+      # 并按限额调整阈值；本规则用进程指标兜底（默认限额 512Mi 的部署请下调）。
+      - alert: GatewayHighMemory
+        expr: |
+          process_resident_memory_bytes{job="gateway"} > 1.073741824e+09
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM Audit Gateway 内存偏高"
+          description: "instance={{ $labels.instance }} 常驻内存超过 1GiB 已持续 10 分钟。排查非流式响应缓冲（>64MB 会 502）、max_request_body_size、stream 窗口配置。"
+          runbook: "见 docs/production-deployment-guide.md 第 9 节。"
+
+      # goroutine 数量异常爬升 => 疑似连接泄漏或上游不响应
+      - alert: GatewayGoroutineSpike
+        expr: |
+          go_goroutines{job="gateway"} > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM Audit Gateway goroutine 数异常"
+          description: "instance={{ $labels.instance }} goroutine 数超过 5000 持续 10 分钟。检查上游连通性、客户端连接是否泄漏、是否有慢流式请求堆积。"
+          runbook: "见 docs/production-deployment-guide.md 第 9 节。"
+
+      # GC 暂停过长通常是内存压力的结果，供参考（阈值按负载调整）
+      - alert: GatewayGcPauseHigh
+        expr: |
+          rate(go_gc_duration_seconds_sum{job="gateway"}[5m])
+            / clamp_min(rate(go_gc_duration_seconds_count{job="gateway"}[5m]), 1)
+            > 0.05
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "LLM Audit Gateway GC 停顿偏高"
+          description: "instance={{ $labels.instance }} 平均 GC 停顿超过 50ms。通常伴随内存压力，配合 GatewayHighMemory 一起判断。"
+
+  - name: llm-audit-gateway.audit-storage
+    rules:
+      # 审计 PVC（/app/logs）磁盘低于 15% => 逼近 max_disk_usage_percent(85%) 保护线
+      # 前提：部署了 node_exporter，且审计目录挂载点名为 /app/logs（见 deployment.yaml）。
+      # 若 mountpoint 不同请调整。无 node_exporter 的集群请删除本规则或降级为 info。
+      - alert: AuditLogDiskLow
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/app/logs"} / node_filesystem_size_bytes{mountpoint="/app/logs"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "审计日志磁盘剩余不足 15%"
+          description: "instance={{ $labels.instance }} 审计卷 /app/logs 剩余低于 15%。磁盘达到 audit.max_disk_usage_percent(默认 85%) 后网关会暂停审计写入并告警——请及时清理或扩容 PVC。"
+          runbook: "检查 audit.log_retention_days 清理是否正常；紧急时扩容 PVC（docs/production-deployment-guide.md 第 4.3 节）。"
+
+  # ---------------------------------------------------------------------------
+  # 业务指标告警（默认注释）
+  # 启用前提：已用 textfile collector / 自建 exporter 提供下列指标
+  # （采集方法见 docs/production-deployment-guide.md 第 6.2 节），或升级到
+  # 内置业务指标的 v0.2.0。取消注释前请把阈值按你的基线调整。
+  # ---------------------------------------------------------------------------
+  # - name: llm-audit-gateway.business
+  #   rules:
+  #     - alert: GatewayBlockRateSpike
+  #       expr: |
+  #         increase(llm_audit_gateway_requests_total{action="block"}[10m]) > 100
+  #       for: 5m
+  #       labels:
+  #         severity: warning
+  #       annotations:
+  #         summary: "拦截量 10 分钟突增"
+  #         description: "近 10 分钟新增 BLOCK 超过 100 次，可能是命中规则增多或误报，请结合审计日志复核（docs 第 7.2 节）。"
+  #     - alert: GatewayAuditWriteError
+  #       expr: |
+  #         increase(llm_audit_gateway_audit_write_errors_total[10m]) > 0
+  #       for: 5m
+  #       labels:
+  #         severity: critical
+  #       annotations:
+  #         summary: "审计写入失败"
+  #         description: "审计日志连续写入失败，合规记录可能缺失，立即处理。"
