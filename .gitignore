@@ -7,7 +7,6 @@
 *.log
 
 # Go
-go.sum
 vendor/
 dist/
 build/
