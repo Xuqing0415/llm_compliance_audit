@@ -44,4 +44,10 @@
 
 ## 漏洞报告
 
-请通过 [GitHub Issues](https://github.com/Xuqing0415/llm_compliance_audit/issues) 报告安全问题，标题标注 `[security]`，并附复现步骤、影响面与建议修复。公开仓库请勿在 issue 中直接粘贴真实生产数据/密钥。
+请通过 GitHub **Security Advisory（私有披露）** 提交安全问题：
+
+<https://github.com/Xuqing0415/llm_compliance_audit/security/advisories/new>
+
+- 披露内容默认仅维护者可见，修复发布后再公开，适合安全研究人员与合作方；请附复现步骤、影响面、受影响版本与建议修复。
+- 不要在生产实例上做破坏性验证，也不要在 issue 或公开渠道粘贴真实生产数据/密钥。
+- 功能咨询、使用问题等非安全事项请走 [GitHub Issues](https://github.com/Xuqing0415/llm_compliance_audit/issues)。

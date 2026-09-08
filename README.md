@@ -1,5 +1,10 @@
 # LLM Compliance Audit Gateway（LLM 合规审计网关）
 
+> **Status**: v0.1.0 · 首个公开版。代码与文档已冻结，可试用；生产接入前请逐项对照 [SECURITY.md](SECURITY.md) 部署清单。
+
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Release](https://img.shields.io/github/v/release/Xuqing0415/llm_compliance_audit)](https://github.com/Xuqing0415/llm_compliance_audit/releases)
+
 面向 LLM/OpenAI 兼容服务的合规审计反向代理：在模型 API 前加一层网关，对进出流量做**敏感数据出境**、**提示词注入**、**命令/SQL 注入**、**批量导出**检测，并把拦截与放行过程记录成**防篡改审计日志**。
 
 > 当前版本：**v0.1.0**（首个公开版）。本版修复了安全审查发现的「先泄露后拦截」「请求头伪造绕过」「审计明文落盘 + 哈希链失效」等核心问题，修复摘要见 [CHANGELOG.md](CHANGELOG.md)，安全设计与部署要求见 [SECURITY.md](SECURITY.md)。
@@ -79,6 +84,16 @@ go test ./...          # 含 internal/smoke 回归套件
 - **tier2 PII 识别与 tier3 语义检测为占位实现**（默认关闭 `tier2_enabled`/`tier3_enabled`），当前能力以 tier1 正则为主。
 - 审计默认 `file` 存储、适合单实例；多副本/高吞吐需接入集中式存储（kafka 适配目前未落地），见 [SECURITY.md](SECURITY.md) 部署清单。
 - 命令/SQL 注入等正则规则存在误报可能，上线建议先 `audit_only_mode: true` 灰度观察（配置见 `configs/config.yaml`，辅助脚本见 `scripts/analyze_false_positives.ps1`）。
+
+## Roadmap（v0.2.0 方向）
+
+按「让生产部署更平滑」排序，社区反馈会调整优先级：
+
+- **Tier 2 PII 识别引擎落地**：当前 `internal/detector/tier2_pii.go` 为占位实现（默认关闭），v0.2.0 计划接入真实 PII 识别并保留现有开关语义。
+- **审计输出 Kafka sink**：`configs/config.yaml` 已预留 `audit.storage_type: kafka` 配置位，替代本地 `file` 存储，支撑多副本/高吞吐。
+- **Prometheus 告警规则示例**：随仓库提供 `alerts.yml`，覆盖拦截量突增、审计写盘失败、磁盘水位等关键信号。
+- **生产部署实战文档**：K8s 模板、Grafana 面板、误报回收定时任务（见 `docs/`，规划中）。
+- **Tier 3 语义检测（可选开关）**：仅在社区反馈「Tier1+Tier2 不够用」时推进。
 
 ## 目录结构
 
