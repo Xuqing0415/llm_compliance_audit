@@ -26,6 +26,9 @@ type AuditLogger struct {
 	wg                sync.WaitGroup
 	stopChan          chan bool
 	mu                sync.RWMutex
+	closing           bool
+	stateMu           sync.Mutex
+	pending           sync.WaitGroup
 	previousHash      string
 	hashMu            sync.RWMutex
 	diskUsageExceeded bool
@@ -172,6 +175,20 @@ func (sa *sessionAggregator) Close() {
 	sa.cleanupTicker.Stop()
 }
 
+// FlushAll returns and clears every in-flight session so a graceful shutdown
+// does not drop stream records that never reached their final Log() call.
+func (sa *sessionAggregator) FlushAll() []*sessionState {
+	sa.mu.Lock()
+	defer sa.mu.Unlock()
+
+	states := make([]*sessionState, 0, len(sa.sessions))
+	for _, state := range sa.sessions {
+		states = append(states, state)
+	}
+	sa.sessions = make(map[string]*sessionState)
+	return states
+}
+
 func NewAuditLogger(cfg *config.Config) (*AuditLogger, error) {
 	logger := &AuditLogger{
 		config:            cfg,
@@ -191,6 +208,18 @@ func NewAuditLogger(cfg *config.Config) (*AuditLogger, error) {
 	return logger, nil
 }
 
+// SetLogDir points the logger at an explicit directory (used by tests so they
+// do not pollute the repository with logs/audit output).
+func (al *AuditLogger) SetLogDir(dir string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	al.logDir = dir
+	return nil
+}
+
 func (al *AuditLogger) startWorker() {
 	al.wg.Add(1)
 	go func() {
@@ -200,10 +229,46 @@ func (al *AuditLogger) startWorker() {
 			case reqCtx := <-al.buffer:
 				al.writeLog(reqCtx)
 			case <-al.stopChan:
-				return
+				// Drain everything already queued before exiting. Logs arriving
+				// after Close began bypass the channel and write synchronously.
+				for {
+					select {
+					case reqCtx := <-al.buffer:
+						al.writeLog(reqCtx)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()
+}
+
+func (al *AuditLogger) configEnabled() bool {
+	al.mu.RLock()
+	defer al.mu.RUnlock()
+	if al.config == nil {
+		return false
+	}
+	return al.config.Audit.Enabled
+}
+
+func (al *AuditLogger) configStorageType() string {
+	al.mu.RLock()
+	defer al.mu.RUnlock()
+	if al.config == nil {
+		return "file"
+	}
+	return al.config.Audit.StorageType
+}
+
+func (al *AuditLogger) auditConfig() config.AuditConfig {
+	al.mu.RLock()
+	defer al.mu.RUnlock()
+	if al.config == nil {
+		return config.AuditConfig{}
+	}
+	return al.config.Audit
 }
 
 func (al *AuditLogger) startDiskMonitor() {
@@ -226,14 +291,12 @@ func (al *AuditLogger) startDiskMonitor() {
 }
 
 func (al *AuditLogger) checkDiskUsage() {
-	al.diskMu.RLock()
-	maxUsage := al.config.Audit.MaxDiskUsagePercent
+	maxUsage := al.auditConfig().MaxDiskUsagePercent
 	if maxUsage == 0 {
 		maxUsage = 85
 	}
-	al.diskMu.RUnlock()
 
-	usedPercent, err := getDiskUsagePercent(al.logDir)
+	usedPercent, err := diskUsagePercent(al.logDir)
 	if err != nil {
 		logrus.Warn("Failed to check disk usage:", err)
 		return
@@ -254,17 +317,11 @@ func (al *AuditLogger) checkDiskUsage() {
 	al.diskMu.Unlock()
 }
 
-func getDiskUsagePercent(path string) (int64, error) {
-	return 0, nil
-}
-
 func (al *AuditLogger) cleanupOldLogs() {
-	al.diskMu.RLock()
-	retentionDays := al.config.Audit.LogRetentionDays
+	retentionDays := al.auditConfig().LogRetentionDays
 	if retentionDays == 0 {
 		retentionDays = 90
 	}
-	al.diskMu.RUnlock()
 
 	cutoffTime := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
 
@@ -296,21 +353,37 @@ func (al *AuditLogger) isDiskExceeded() bool {
 }
 
 func (al *AuditLogger) Log(ctx context.Context, request *types.RequestContext) error {
-	if !al.config.Audit.Enabled || al.isDiskExceeded() {
+	if !al.configEnabled() || al.isDiskExceeded() {
 		return nil
 	}
 
+	al.stateMu.Lock()
+	if al.closing {
+		// Close() has started; the worker may no longer read the channel, so
+		// fall through to a synchronous write to avoid dropping the record.
+		al.stateMu.Unlock()
+		al.writeLog(request)
+		return nil
+	}
+	al.pending.Add(1)
+	al.stateMu.Unlock()
+	defer al.pending.Done()
+
 	select {
 	case al.buffer <- request:
+		return nil
 	default:
-		logrus.Warn("Audit log buffer is full, dropping log")
+		// Never drop audit records because of a full buffer: degrade to a
+		// synchronous write so the log still lands on disk.
+		logrus.Warn("Audit log buffer is full; writing synchronously")
 	}
 
+	al.writeLog(request)
 	return nil
 }
 
 func (al *AuditLogger) LogStreamChunk(ctx context.Context, request *types.RequestContext, chunk string) error {
-	if !al.config.Audit.Enabled || al.isDiskExceeded() {
+	if !al.configEnabled() || al.isDiskExceeded() {
 		return nil
 	}
 
@@ -320,31 +393,33 @@ func (al *AuditLogger) LogStreamChunk(ctx context.Context, request *types.Reques
 }
 
 func (al *AuditLogger) writeLog(request *types.RequestContext) {
-	al.mu.Lock()
-	defer al.mu.Unlock()
-
 	if request.IsStream {
 		session := al.sessionAggregator.Aggregate(request)
 		if session == nil {
 			return
 		}
-		al.writeSessionLog(session)
-	} else {
-		switch al.config.Audit.StorageType {
-		case "file":
-			al.writeToFile(request)
-		case "kafka":
-			al.writeToKafka(request)
-		default:
-			al.writeToFile(request)
+		if !al.shouldWriteLog(session.Action, session.DetectionResults) {
+			return
 		}
+		al.writeSessionLog(session)
+		return
+	}
+
+	if !al.shouldWriteLog(request.Action, request.DetectionResults) {
+		return
+	}
+
+	switch al.configStorageType() {
+	case "kafka":
+		al.writeToKafka(request)
+	default:
+		al.writeToFile(request)
 	}
 }
 
 func (al *AuditLogger) writeSessionLog(session *sessionState) {
-	if !al.shouldWriteLog(session.Action, session.DetectionResults) {
-		return
-	}
+	al.mu.Lock()
+	defer al.mu.Unlock()
 
 	dateStr := time.Now().Format("2006-01-02")
 	fileName := filepath.Join(al.logDir, "audit-"+dateStr+".log")
@@ -374,13 +449,14 @@ func (al *AuditLogger) writeSessionLog(session *sessionState) {
 		return
 	}
 
-	file.WriteString(string(data) + "\n")
+	if _, err := file.WriteString(string(data) + "\n"); err != nil {
+		logrus.Error("Failed to write audit log:", err)
+	}
 }
 
 func (al *AuditLogger) writeToFile(request *types.RequestContext) {
-	if !al.shouldWriteLog(request.Action, request.DetectionResults) {
-		return
-	}
+	al.mu.Lock()
+	defer al.mu.Unlock()
 
 	dateStr := time.Now().Format("2006-01-02")
 	fileName := filepath.Join(al.logDir, "audit-"+dateStr+".log")
@@ -410,7 +486,9 @@ func (al *AuditLogger) writeToFile(request *types.RequestContext) {
 		return
 	}
 
-	file.WriteString(string(data) + "\n")
+	if _, err := file.WriteString(string(data) + "\n"); err != nil {
+		logrus.Error("Failed to write audit log:", err)
+	}
 }
 
 func (al *AuditLogger) writeToKafka(request *types.RequestContext) {
@@ -418,9 +496,36 @@ func (al *AuditLogger) writeToKafka(request *types.RequestContext) {
 }
 
 func (al *AuditLogger) Close() {
+	al.stateMu.Lock()
+	if al.closing {
+		al.stateMu.Unlock()
+		return
+	}
+	al.closing = true
+	al.stateMu.Unlock()
+
+	// Persist stream sessions that never reached their final Log() call.
+	for _, state := range al.sessionAggregator.FlushAll() {
+		if al.shouldWriteLog(state.Action, state.DetectionResults) {
+			al.writeSessionLog(state)
+		}
+	}
+
 	close(al.stopChan)
 	al.sessionAggregator.Close()
 	al.wg.Wait()
+
+	// Wait for producers that passed the closing check just before Close and
+	// then drain whatever they queued after the worker exited.
+	al.pending.Wait()
+	for {
+		select {
+		case reqCtx := <-al.buffer:
+			al.writeLog(reqCtx)
+		default:
+			return
+		}
+	}
 }
 
 func (al *AuditLogger) QueryByTraceID(traceID string) (*SessionLogEntry, error) {

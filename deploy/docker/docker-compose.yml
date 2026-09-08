@@ -12,8 +12,9 @@ services:
     environment:
       - CONFIG_PATH=/app/configs/config.yaml
     volumes:
-      - ./configs/config.yaml:/app/configs/config.yaml
-      - ./logs:/app/logs
+      - ../configs/config.yaml:/app/configs/config.yaml
+      - ../configs/exemptions.yaml:/app/configs/exemptions.yaml
+      - ../logs:/app/logs
     networks:
       - llm-network
     restart: unless-stopped

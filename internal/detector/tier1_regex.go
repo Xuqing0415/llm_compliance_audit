@@ -14,23 +14,23 @@ import (
 )
 
 type RegexDetector struct {
-	name                  string
-	rules                 []compiledRule
-	exemptionManager      *ExemptionManager
-	fingerprintRules      []fingerprintRule
-	disabledRules         map[string]bool
+	name                   string
+	rules                  []compiledRule
+	exemptionManager       *ExemptionManager
+	fingerprintRules       []fingerprintRule
+	disabledRules          map[string]bool
 	purposeActionOverrides map[string]map[string]types.Action
-	mu                    sync.RWMutex
+	mu                     sync.RWMutex
 }
 
 type compiledRule struct {
-	name          string
-	pattern       *regexp.Regexp
-	category      types.DetectionCategory
-	severity      types.DetectionSeverity
-	action        types.Action
-	description   string
-	validator     func(string) bool
+	name        string
+	pattern     *regexp.Regexp
+	category    types.DetectionCategory
+	severity    types.DetectionSeverity
+	action      types.Action
+	description string
+	validator   func(string) bool
 }
 
 type fingerprintRule struct {
@@ -47,9 +47,9 @@ func NewRegexDetector(cfg *config.Config, em *ExemptionManager) (*RegexDetector,
 	}
 
 	detector := &RegexDetector{
-		name:                  "regex_detector",
-		rules:                 make([]compiledRule, 0),
-		exemptionManager:      em,
+		name:             "regex_detector",
+		rules:            make([]compiledRule, 0),
+		exemptionManager: em,
 		fingerprintRules: []fingerprintRule{
 			{
 				name:        "IgnorePreviousInstructions",
@@ -80,7 +80,7 @@ func NewRegexDetector(cfg *config.Config, em *ExemptionManager) (*RegexDetector,
 				description: "恶意任务请求",
 			},
 		},
-		disabledRules:         make(map[string]bool),
+		disabledRules:          make(map[string]bool),
 		purposeActionOverrides: make(map[string]map[string]types.Action),
 	}
 
@@ -227,111 +227,120 @@ func (rd *RegexDetector) loadRules(cfg *config.Config) error {
 	rd.mu.Lock()
 	defer rd.mu.Unlock()
 
-	rd.rules = make([]compiledRule, 0)
+	rd.rules = make([]compiledRule, 0, len(cfg.Detection.RegexRules))
 
-	rulesConfig := []struct {
-		name        string
-		pattern     string
-		category    string
-		severity    string
-		action      string
-		description string
-		validator   func(string) bool
-	}{
-		{
-			name:        "身份证号",
-			pattern:     "[1-9]\\d{5}(18|19|20)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx]",
-			category:    "SENSITIVE_DATA",
-			severity:    "HIGH",
-			action:      "BLOCK",
-			description: "中国身份证号",
-			validator:   validateIDCard,
-		},
-		{
-			name:        "手机号",
-			pattern:     "1[3-9]\\d{9}",
-			category:    "SENSITIVE_DATA",
-			severity:    "MEDIUM",
-			action:      "BLOCK",
-			description: "中国手机号",
-			validator:   validatePhone,
-		},
-		{
-			name:        "邮箱",
-			pattern:     "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
-			category:    "SENSITIVE_DATA",
-			severity:    "MEDIUM",
-			action:      "BLOCK",
-			description: "邮箱地址",
-			validator:   nil,
-		},
-		{
-			name:        "银行卡号",
-			pattern:     "\\b\\d{16,19}\\b",
-			category:    "SENSITIVE_DATA",
-			severity:    "HIGH",
-			action:      "BLOCK",
-			description: "银行卡号",
-			validator:   validateBankCard,
-		},
-		{
-			name:        "IP地址",
-			pattern:     "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b",
-			category:    "OTHER",
-			severity:    "LOW",
-			action:      "ALERT",
-			description: "IPv4地址",
-			validator:   nil,
-		},
-		{
-			name:        "URL",
-			pattern:     "https?://[\\w\\-._~:/?#[\\]@!$&'()*+,;=%]+",
-			category:    "OTHER",
-			severity:    "LOW",
-			action:      "ALERT",
-			description: "URL地址",
-			validator:   nil,
-		},
-		{
-			name:        "命令注入",
-			pattern:     "(?:;|\\|\\||&&|\\$\\(|`|\\b(?:cat|ls|rm|mkdir|chmod|wget|curl|nc)\\b)",
-			category:    "MALICIOUS",
-			severity:    "CRITICAL",
-			action:      "BLOCK",
-			description: "命令注入检测",
-			validator:   nil,
-		},
-		{
-			name:        "SQL注入",
-			pattern:     "(?:(?:')(?:AND|OR)\\s+\\d+=\\d+|UNION\\s+SELECT|DROP\\s+TABLE|INSERT\\s+INTO)",
-			category:    "MALICIOUS",
-			severity:    "CRITICAL",
-			action:      "BLOCK",
-			description: "SQL注入检测",
-			validator:   nil,
-		},
+	// Prefer the rules from config so regex_rules actually takes effect after a
+	// hot reload. When the file ships without rules, fall back to the built-in
+	// defaults so the gateway still does something useful out of the box.
+	rulesConfig := cfg.Detection.RegexRules
+	if len(rulesConfig) == 0 {
+		rulesConfig = rd.defaultRules()
 	}
 
 	for _, rule := range rulesConfig {
-		pattern, err := regexp.Compile(rule.pattern)
+		pattern, err := regexp.Compile(rule.Pattern)
 		if err != nil {
-			logrus.Warn("Invalid regex pattern:", rule.name, err)
+			logrus.Warn("Invalid regex pattern:", rule.Name, err)
 			continue
 		}
 
 		rd.rules = append(rd.rules, compiledRule{
-			name:        rule.name,
+			name:        rule.Name,
 			pattern:     pattern,
-			category:    types.DetectionCategory(rule.category),
-			severity:    types.DetectionSeverity(rule.severity),
-			action:      types.Action(rule.action),
-			description: rule.description,
-			validator:   rule.validator,
+			category:    types.DetectionCategory(rule.Category),
+			severity:    types.DetectionSeverity(rule.Severity),
+			action:      types.Action(rule.Action),
+			description: rule.Description,
+			validator:   validatorByName(rule.Name),
 		})
 	}
 
 	logrus.Info("Loaded ", len(rd.rules), " regex rules")
 	return nil
+}
+
+// validatorByName attaches checksum-style validators to rules that carry the
+// well-known names used by the default rule set. Rules renamed in config simply
+// lose the extra validation and fall back to the raw pattern.
+func validatorByName(name string) func(string) bool {
+	switch name {
+	case "身份证号":
+		return validateIDCard
+	case "银行卡号":
+		return validateBankCard
+	case "手机号":
+		return validatePhone
+	}
+	return nil
+}
+
+func (rd *RegexDetector) defaultRules() []config.RegexRule {
+	return []config.RegexRule{
+		{
+			Name:        "身份证号",
+			Pattern:     "[1-9]\\d{5}(18|19|20)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx]",
+			Category:    "SENSITIVE_DATA",
+			Severity:    "HIGH",
+			Action:      "BLOCK",
+			Description: "中国身份证号",
+		},
+		{
+			Name:        "手机号",
+			Pattern:     "1[3-9]\\d{9}",
+			Category:    "SENSITIVE_DATA",
+			Severity:    "MEDIUM",
+			Action:      "BLOCK",
+			Description: "中国手机号",
+		},
+		{
+			Name:        "邮箱",
+			Pattern:     "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+			Category:    "SENSITIVE_DATA",
+			Severity:    "MEDIUM",
+			Action:      "BLOCK",
+			Description: "邮箱地址",
+		},
+		{
+			Name:        "银行卡号",
+			Pattern:     "\\b\\d{16,19}\\b",
+			Category:    "SENSITIVE_DATA",
+			Severity:    "HIGH",
+			Action:      "BLOCK",
+			Description: "银行卡号",
+		},
+		{
+			Name:        "IP地址",
+			Pattern:     "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b",
+			Category:    "OTHER",
+			Severity:    "LOW",
+			Action:      "ALERT",
+			Description: "IPv4地址",
+		},
+		{
+			Name:        "URL",
+			Pattern:     "https?://[\\w\\-._~:/?#[\\]@!$&'()*+,;=%]+",
+			Category:    "OTHER",
+			Severity:    "LOW",
+			Action:      "ALERT",
+			Description: "URL地址",
+		},
+		{
+			Name:        "命令注入",
+			Pattern:     "(?i)(?:[;|&`]|\\$\\(|\\b(?:run|execute|exec|启动|执行)\\s+)\\s*\\b(?:rm|cat|ls|curl|wget|chmod|chown|mkdir|rmdir|nc|ncat|bash|sh|zsh|python|perl|powershell|cmd)\\b",
+			Category:    "MALICIOUS",
+			Severity:    "CRITICAL",
+			Action:      "BLOCK",
+			Description: "命令注入检测",
+		},
+		{
+			Name:        "SQL注入",
+			Pattern:     "(?:(?:')(?:AND|OR)\\s+\\d+=\\d+|UNION\\s+SELECT|DROP\\s+TABLE|INSERT\\s+INTO)",
+			Category:    "MALICIOUS",
+			Severity:    "CRITICAL",
+			Action:      "BLOCK",
+			Description: "SQL注入检测",
+		},
+	}
 }
 
 func (rd *RegexDetector) ReloadRules(cfg *config.Config) error {
@@ -348,13 +357,13 @@ func (rd *RegexDetector) Detect(ctx context.Context, request *types.RequestConte
 
 	if len(rules) == 0 && len(fingerprints) == 0 {
 		return &types.DetectionResult{
-			Tier:      types.Tier1Regex,
-			Detector:  rd.name,
-			Category:  types.CategoryOther,
-			Severity:  types.SeverityLow,
-			Matched:   false,
+			Tier:       types.Tier1Regex,
+			Detector:   rd.name,
+			Category:   types.CategoryOther,
+			Severity:   types.SeverityLow,
+			Matched:    false,
 			Confidence: 0,
-			Action:    types.ActionAllow,
+			Action:     types.ActionAllow,
 		}, nil
 	}
 
@@ -425,36 +434,34 @@ func (rd *RegexDetector) Detect(ctx context.Context, request *types.RequestConte
 	}
 
 	for _, fp := range fingerprints {
-		matchCount := 0
 		for _, pattern := range fp.patterns {
 			if pattern.MatchString(content) {
-				matchCount++
+				// A fingerprint rule fires when ANY of its patterns matches.
+				// Requiring every pattern to hit (AND semantics) made prompt
+				// injection detection effectively dead code.
+				return &types.DetectionResult{
+					Tier:        types.Tier1Regex,
+					Detector:    rd.name,
+					Category:    fp.category,
+					Severity:    fp.severity,
+					Matched:     true,
+					MatchDetail: fp.name,
+					Confidence:  1.0,
+					Action:      types.ActionBlock,
+					Message:     fp.description,
+				}, nil
 			}
-		}
-
-		if matchCount >= len(fp.patterns) {
-			return &types.DetectionResult{
-				Tier:        types.Tier1Regex,
-				Detector:    rd.name,
-				Category:    fp.category,
-				Severity:    fp.severity,
-				Matched:     true,
-				MatchDetail: fp.name,
-				Confidence:  1.0,
-				Action:      types.ActionBlock,
-				Message:     fp.description,
-			}, nil
 		}
 	}
 
 	return &types.DetectionResult{
-		Tier:      types.Tier1Regex,
-		Detector:  rd.name,
-		Category:  types.CategoryOther,
-		Severity:  types.SeverityLow,
-		Matched:   false,
+		Tier:       types.Tier1Regex,
+		Detector:   rd.name,
+		Category:   types.CategoryOther,
+		Severity:   types.SeverityLow,
+		Matched:    false,
 		Confidence: 0,
-		Action:    types.ActionAllow,
+		Action:     types.ActionAllow,
 	}, nil
 }
 

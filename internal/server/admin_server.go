@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 
 	"llm-audit-gateway/internal/audit"
@@ -18,13 +21,15 @@ import (
 )
 
 type AdminServer struct {
-	engine        *gin.Engine
-	httpServer    *http.Server
-	stats         *pipeline.StatsCollector
-	exemption     *detector.ExemptionManager
-	regexDetector *detector.RegexDetector
-	proxyHandler  *proxy.ProxyHandler
-	auditLogger   *audit.AuditLogger
+	engine            *gin.Engine
+	httpServer        *http.Server
+	stats             *pipeline.StatsCollector
+	exemption         *detector.ExemptionManager
+	regexDetector     *detector.RegexDetector
+	proxyHandler      *proxy.ProxyHandler
+	auditLogger       *audit.AuditLogger
+	adminToken        string
+	monitoringEnabled bool
 }
 
 func NewAdminServer(cfg *config.Config, stats *pipeline.StatsCollector, exemption *detector.ExemptionManager, regexDetector *detector.RegexDetector, proxyHandler *proxy.ProxyHandler, auditLogger *audit.AuditLogger) *AdminServer {
@@ -35,17 +40,26 @@ func NewAdminServer(cfg *config.Config, stats *pipeline.StatsCollector, exemptio
 	engine.Use(gin.Recovery())
 
 	as := &AdminServer{
-		engine:        engine,
-		stats:         stats,
-		exemption:     exemption,
-		regexDetector: regexDetector,
-		proxyHandler:  proxyHandler,
-		auditLogger:   auditLogger,
+		engine:            engine,
+		stats:             stats,
+		exemption:         exemption,
+		regexDetector:     regexDetector,
+		proxyHandler:      proxyHandler,
+		auditLogger:       auditLogger,
+		adminToken:        cfg.Server.AdminToken,
+		monitoringEnabled: cfg.Monitoring.Enabled,
 	}
 
 	as.setupRoutes()
 
+	if as.monitoringEnabled {
+		engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	}
+
 	adminPort := cfg.Server.AdminPort
+	if adminPort == 0 {
+		adminPort = cfg.Monitoring.MetricsPort
+	}
 	if adminPort == 0 {
 		adminPort = 9090
 	}
@@ -62,17 +76,48 @@ func NewAdminServer(cfg *config.Config, stats *pipeline.StatsCollector, exemptio
 	return as
 }
 
+// adminAuth guards the admin API. When an admin_token is configured, callers
+// must present it via the X-Admin-Token header. Without a token the API is
+// only reachable from loopback so a random network caller cannot flip bypass /
+// policy switches with a single curl.
+func (as *AdminServer) adminAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if as.adminToken != "" {
+			if c.GetHeader("X-Admin-Token") == as.adminToken {
+				c.Next()
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
+		host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+		if err == nil {
+			host = strings.TrimPrefix(host, "::ffff:")
+			if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "admin API requires loopback access or a configured admin_token",
+		})
+	}
+}
+
 func (as *AdminServer) setupRoutes() {
-	as.engine.POST("/admin/whitelist", as.handleWhitelist)
-	as.engine.POST("/admin/rules/toggle", as.handleRuleToggle)
-	as.engine.GET("/admin/stats", as.handleStats)
-	as.engine.POST("/admin/exemptions/reload", as.handleExemptionsReload)
-	as.engine.GET("/admin/exemptions", as.handleGetExemptions)
-	as.engine.POST("/admin/bypass", as.handleBypass)
-	as.engine.GET("/admin/bypass", as.handleGetBypass)
-	as.engine.POST("/admin/policy/active", as.handlePolicyActive)
-	as.engine.GET("/admin/policy/active", as.handleGetPolicyActive)
-	as.engine.GET("/admin/audit/trace", as.handleAuditTrace)
+	admin := as.engine.Group("/admin")
+	admin.Use(as.adminAuth())
+	admin.POST("/whitelist", as.handleWhitelist)
+	admin.POST("/rules/toggle", as.handleRuleToggle)
+	admin.GET("/stats", as.handleStats)
+	admin.POST("/exemptions/reload", as.handleExemptionsReload)
+	admin.GET("/exemptions", as.handleGetExemptions)
+	admin.POST("/bypass", as.handleBypass)
+	admin.GET("/bypass", as.handleGetBypass)
+	admin.POST("/policy/active", as.handlePolicyActive)
+	admin.GET("/policy/active", as.handleGetPolicyActive)
+	admin.GET("/audit/trace", as.handleAuditTrace)
 }
 
 func (as *AdminServer) handleWhitelist(c *gin.Context) {
@@ -95,19 +140,27 @@ func (as *AdminServer) handleWhitelist(c *gin.Context) {
 	switch request.Action {
 	case "add":
 		as.exemption.AddKeyword(request.RuleName, request.Keyword)
+		if err := as.exemption.Persist(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist exemptions", "details": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":     "success",
-			"rule_name":  request.RuleName,
-			"keyword":    request.Keyword,
-			"action":     "added",
+			"status":    "success",
+			"rule_name": request.RuleName,
+			"keyword":   request.Keyword,
+			"action":    "added",
 		})
 	case "remove":
 		as.exemption.RemoveKeyword(request.RuleName, request.Keyword)
+		if err := as.exemption.Persist(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist exemptions", "details": err.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":     "success",
-			"rule_name":  request.RuleName,
-			"keyword":    request.Keyword,
-			"action":     "removed",
+			"status":    "success",
+			"rule_name": request.RuleName,
+			"keyword":   request.Keyword,
+			"action":    "removed",
 		})
 	}
 }
@@ -115,7 +168,7 @@ func (as *AdminServer) handleWhitelist(c *gin.Context) {
 func (as *AdminServer) handleRuleToggle(c *gin.Context) {
 	var request struct {
 		RuleName string `json:"rule_name" binding:"required"`
-		Enable   bool   `json:"enable" binding:"required"`
+		Enable   *bool  `json:"enable" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -128,12 +181,14 @@ func (as *AdminServer) handleRuleToggle(c *gin.Context) {
 		return
 	}
 
-	as.regexDetector.ToggleRule(request.RuleName, request.Enable)
+	// Boolean binding uses a pointer: binding:"required" treats plain false as
+	// "missing", which used to make it impossible to disable a rule.
+	as.regexDetector.ToggleRule(request.RuleName, *request.Enable)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "success",
 		"rule_name": request.RuleName,
-		"enabled":   request.Enable,
+		"enabled":   *request.Enable,
 	})
 }
 
@@ -172,7 +227,11 @@ func (as *AdminServer) handleExemptionsReload(c *gin.Context) {
 		return
 	}
 
-	if err := as.exemption.LoadFromFile("configs/exemptions.yaml"); err != nil {
+	path := as.exemption.SourceFile()
+	if path == "" {
+		path = "configs/exemptions.yaml"
+	}
+	if err := as.exemption.LoadFromFile(path); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reload exemptions", "details": err.Error()})
 		return
 	}
@@ -194,7 +253,7 @@ func (as *AdminServer) handleGetExemptions(c *gin.Context) {
 
 func (as *AdminServer) handleBypass(c *gin.Context) {
 	var request struct {
-		Enable bool `json:"enable" binding:"required"`
+		Enable *bool `json:"enable" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -207,12 +266,14 @@ func (as *AdminServer) handleBypass(c *gin.Context) {
 		return
 	}
 
-	as.proxyHandler.SetBypassMode(request.Enable)
+	// Pointer binding so enable:false (turning bypass OFF) is not rejected by
+	// binding:"required".
+	as.proxyHandler.SetBypassMode(*request.Enable)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"bypass":  request.Enable,
-		"message": map[bool]string{true: "Bypass mode enabled: all detection skipped", false: "Bypass mode disabled: detection resumed"}[request.Enable],
+		"bypass":  *request.Enable,
+		"message": map[bool]string{true: "Bypass mode enabled: all detection skipped", false: "Bypass mode disabled: detection resumed"}[*request.Enable],
 	})
 }
 
@@ -251,12 +312,12 @@ func (as *AdminServer) handlePolicyActive(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":       "success",
+		"status":        "success",
 		"active_policy": types.GetActivePolicy(),
 		"message": map[string]string{
-			"default":         "Default policy restored: follows execution_policies config",
-			"fallback-audit":  "Fallback audit policy activated: all policies behave as force_audit",
-			"force-block":     "Force-block policy activated: all policies behave as force_block",
+			"default":        "Default policy restored: follows execution_policies config",
+			"fallback-audit": "Fallback audit policy activated: all policies behave as force_audit",
+			"force-block":    "Force-block policy activated: all policies behave as force_block",
 		}[request.Set],
 	})
 }
@@ -291,17 +352,17 @@ func (as *AdminServer) handleAuditTrace(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"trace_id":        entry.SessionID,
-		"request_id":      entry.RequestID,
-		"timestamp":       entry.Timestamp.Format(time.RFC3339),
-		"client_ip":       entry.ClientIP,
-		"final_severity":  string(entry.FinalSeverity),
-		"sensitivity":     entry.Sensitivity,
-		"action":          string(entry.Action),
-		"triggered_rules": entry.TriggeredRules,
-		"status_code":     entry.StatusCode,
+		"trace_id":          entry.SessionID,
+		"request_id":        entry.RequestID,
+		"timestamp":         entry.Timestamp.Format(time.RFC3339),
+		"client_ip":         entry.ClientIP,
+		"final_severity":    string(entry.FinalSeverity),
+		"sensitivity":       entry.Sensitivity,
+		"action":            string(entry.Action),
+		"triggered_rules":   entry.TriggeredRules,
+		"status_code":       entry.StatusCode,
 		"detection_results": entry.DetectionResults,
-		"duration_ms":     entry.Duration,
+		"duration_ms":       entry.Duration,
 	})
 }
 

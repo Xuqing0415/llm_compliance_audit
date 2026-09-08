@@ -2,6 +2,9 @@ server:
   host: "0.0.0.0"
   port: 8080
   admin_port: 9090
+  # 管理接口鉴权：留空表示仅本机(loopback)可访问；生产建议设置随机 token，
+  # 调用管理接口时通过 X-Admin-Token 请求头携带。
+  admin_token: ""
   read_timeout: 30
   write_timeout: 30
   max_request_body_size: 10485760
@@ -56,7 +59,7 @@ detection:
       action: "BLOCK"
       description: "邮箱地址正则"
     - name: "银行卡号"
-      pattern: "\\d{16,19}"
+      pattern: "\\b\\d{16,19}\\b"
       category: "SENSITIVE_DATA"
       severity: "HIGH"
       action: "BLOCK"
@@ -74,7 +77,7 @@ detection:
       action: "ALERT"
       description: "URL地址正则"
     - name: "命令注入"
-      pattern: "(?:;|\\|\\||&&|\\$\\(|`|\\b(?:cat|ls|rm|mkdir|chmod|wget|curl|nc)\\b)"
+      pattern: "(?i)(?:[;|&`]|\\$\\(|\\b(?:run|execute|exec|启动|执行)\\s+)\\s*\\b(?:rm|cat|ls|curl|wget|chmod|chown|mkdir|rmdir|nc|ncat|bash|sh|zsh|python|perl|powershell|cmd)\\b"
       category: "MALICIOUS"
       severity: "CRITICAL"
       action: "BLOCK"

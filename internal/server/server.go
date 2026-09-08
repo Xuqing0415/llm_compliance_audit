@@ -55,11 +55,13 @@ func NewServer(cfg *config.Config, proxyHandler *proxy.ProxyHandler) *Server {
 	})
 
 	httpServer := &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:        engine,
-		ReadTimeout:    time.Duration(cfg.Server.ReadTimeout) * time.Second,
-		WriteTimeout:   time.Duration(cfg.Server.WriteTimeout) * time.Second,
-		MaxHeaderBytes: cfg.Server.MaxRequestBodySize,
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:      engine,
+		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
+		WriteTimeout: 0, // streaming LLM responses routinely exceed 30s; a write
+		// deadline would abort long generations mid-stream.
+		// max_request_body_size is enforced on the body in the proxy handler
+		// (http.MaxBytesReader), not via MaxHeaderBytes.
 	}
 
 	return &Server{

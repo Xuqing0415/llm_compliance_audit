@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -40,8 +41,13 @@ func main() {
 	}
 	config.SetInstance(cfg)
 
+	// Exemptions live next to the config file (configs/exemptions.yaml by
+	// default) so the gateway works regardless of the working directory it is
+	// launched from.
+	exemptionsPath := filepath.Join(filepath.Dir(*configPath), "exemptions.yaml")
+
 	exemptionManager := detector.NewExemptionManager()
-	if err := exemptionManager.LoadFromFile("configs/exemptions.yaml"); err != nil {
+	if err := exemptionManager.LoadFromFile(exemptionsPath); err != nil {
 		logrus.Warn("Failed to load exemptions file:", err)
 	}
 
@@ -78,7 +84,11 @@ func main() {
 	}
 
 	proxyHandler.SetDetectionFunc(func(ctx context.Context, request *types.RequestContext) (*types.DetectionResult, error) {
-		if cfg.Detection.ParallelDetection {
+		// Read the *current* config instance at call time so hot-reloading
+		// parallel_detection (or other toggles) actually takes effect instead of
+		// being frozen in the startup closure.
+		current := config.GetInstance()
+		if current.Detection.ParallelDetection {
 			return detectionPipeline.ExecuteParallel(ctx, request)
 		}
 		return detectionPipeline.Execute(ctx, request)
@@ -131,9 +141,9 @@ func main() {
 	if err != nil {
 		logrus.Warn("Failed to create exemption watcher:", err)
 	} else {
-		if err := exemptionWatcher.Watch("configs/exemptions.yaml", func() {
+		if err := exemptionWatcher.Watch(exemptionsPath, func() {
 			logrus.Info("Exemptions file changed, reloading...")
-			if err := exemptionManager.LoadFromFile("configs/exemptions.yaml"); err != nil {
+			if err := exemptionManager.LoadFromFile(exemptionsPath); err != nil {
 				logrus.Error("Failed to reload exemptions:", err)
 			}
 		}); err != nil {

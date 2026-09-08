@@ -5,7 +5,11 @@ metadata:
   labels:
     app: llm-audit-gateway
 spec:
-  replicas: 3
+  # File-backed audit chains require a single writer per log file. Keep one
+  # replica when storage_type=file so records stay ordered and are not lost to
+  # a replica restart. Scale horizontally only after moving audit to a central
+  # backend (kafka etc.).
+  replicas: 1
   selector:
     matchLabels:
       app: llm-audit-gateway
@@ -33,6 +37,11 @@ spec:
         - name: config
           mountPath: /app/configs/config.yaml
           subPath: config.yaml
+        - name: exemptions
+          mountPath: /app/configs/exemptions.yaml
+          subPath: exemptions.yaml
+        - name: logs
+          mountPath: /app/logs
         resources:
           requests:
             cpu: "100m"
@@ -56,6 +65,12 @@ spec:
       - name: config
         configMap:
           name: llm-audit-gateway-config
+      - name: exemptions
+        configMap:
+          name: llm-audit-gateway-exemptions
+      - name: logs
+        persistentVolumeClaim:
+          claimName: llm-audit-logs
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -134,8 +149,10 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: llm-audit-gateway
-  minReplicas: 3
-  maxReplicas: 10
+  # HPA is pinned to the single-replica file-audit deployment. Scale out only
+  # after moving audit storage to a centralized backend.
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
   - type: Resource
     resource:
@@ -149,3 +166,34 @@ spec:
       target:
         type: Utilization
         averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-audit-gateway-exemptions
+data:
+  exemptions.yaml: |
+    exemptions:
+      - rule_name: "身份证号"
+        keywords: []
+      - rule_name: "手机号"
+        keywords: []
+      - rule_name: "邮箱"
+        keywords: []
+      - rule_name: "银行卡号"
+        keywords: []
+      - rule_name: "IP地址"
+        keywords: []
+      - rule_name: "URL"
+        keywords: []
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-audit-logs
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

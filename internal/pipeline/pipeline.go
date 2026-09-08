@@ -11,15 +11,27 @@ import (
 )
 
 type DetectionPipeline struct {
-	detectors   []types.Detector
-	stats       *StatsCollector
-	mu          sync.RWMutex
+	detectors []types.Detector
+	stats     *StatsCollector
+	mu        sync.RWMutex
 }
 
 func NewDetectionPipeline() *DetectionPipeline {
 	return &DetectionPipeline{
 		detectors: make([]types.Detector, 0),
 		stats:     NewStatsCollector(10000),
+	}
+}
+
+func (p *DetectionPipeline) noMatchResult() *types.DetectionResult {
+	return &types.DetectionResult{
+		Tier:       types.Tier1Regex,
+		Detector:   "pipeline",
+		Category:   types.CategoryOther,
+		Severity:   types.SeverityLow,
+		Matched:    false,
+		Confidence: 0,
+		Action:     types.ActionAllow,
 	}
 }
 
@@ -77,13 +89,13 @@ func (p *DetectionPipeline) Execute(ctx context.Context, request *types.RequestC
 	}
 
 	return &types.DetectionResult{
-		Tier:      types.Tier1Regex,
-		Detector:  "pipeline",
-		Category:  types.CategoryOther,
-		Severity:  types.SeverityLow,
-		Matched:   false,
+		Tier:       types.Tier1Regex,
+		Detector:   "pipeline",
+		Category:   types.CategoryOther,
+		Severity:   types.SeverityLow,
+		Matched:    false,
 		Confidence: 0,
-		Action:    types.ActionAllow,
+		Action:     types.ActionAllow,
 	}, nil
 }
 
@@ -94,15 +106,7 @@ func (p *DetectionPipeline) ExecuteParallel(ctx context.Context, request *types.
 	p.mu.RUnlock()
 
 	if len(detectors) == 0 {
-		return &types.DetectionResult{
-			Tier:      types.Tier1Regex,
-			Detector:  "pipeline",
-			Category:  types.CategoryOther,
-			Severity:  types.SeverityLow,
-			Matched:   false,
-			Confidence: 0,
-			Action:    types.ActionAllow,
-		}, nil
+		return p.noMatchResult(), nil
 	}
 
 	resultChan := make(chan *types.DetectionResult, len(detectors))
@@ -113,7 +117,15 @@ func (p *DetectionPipeline) ExecuteParallel(ctx context.Context, request *types.
 		wg.Add(1)
 		go func(d types.Detector) {
 			defer wg.Done()
+			start := time.Now()
 			result, err := d.Detect(ctx, request)
+			duration := time.Since(start)
+
+			if p.stats != nil {
+				matched := result != nil && result.Matched
+				p.stats.RecordLatency(d.Name(), duration, matched)
+			}
+
 			if err != nil {
 				errChan <- err
 				return
@@ -130,23 +142,27 @@ func (p *DetectionPipeline) ExecuteParallel(ctx context.Context, request *types.
 		close(errChan)
 	}()
 
-	for err := range errChan {
-		logrus.Warn("Detector error:", err)
+	// Return on the first detector that reports a match so a slow detector no
+	// longer holds up the whole request. Detectors still running when a match
+	// arrives finish in the background; both channels are buffered to fit every
+	// detector, so they can never block on send.
+	for {
+		select {
+		case result, ok := <-resultChan:
+			if !ok {
+				// Both channels are closed together after every detector has
+				// finished; no match was found.
+				return p.noMatchResult(), nil
+			}
+			if result != nil {
+				return result, nil
+			}
+		case err, ok := <-errChan:
+			if ok && err != nil {
+				logrus.Warn("Detector error:", err)
+			}
+		}
 	}
-
-	for result := range resultChan {
-		return result, nil
-	}
-
-	return &types.DetectionResult{
-		Tier:      types.Tier1Regex,
-		Detector:  "pipeline",
-		Category:  types.CategoryOther,
-		Severity:  types.SeverityLow,
-		Matched:   false,
-		Confidence: 0,
-		Action:    types.ActionAllow,
-	}, nil
 }
 
 func (p *DetectionPipeline) ExecuteStream(ctx context.Context, chunk string, request *types.RequestContext) (*types.DetectionResult, error) {
@@ -168,13 +184,13 @@ func (p *DetectionPipeline) ExecuteStream(ctx context.Context, chunk string, req
 	}
 
 	return &types.DetectionResult{
-		Tier:      types.Tier1Regex,
-		Detector:  "pipeline",
-		Category:  types.CategoryOther,
-		Severity:  types.SeverityLow,
-		Matched:   false,
+		Tier:       types.Tier1Regex,
+		Detector:   "pipeline",
+		Category:   types.CategoryOther,
+		Severity:   types.SeverityLow,
+		Matched:    false,
 		Confidence: 0,
-		Action:    types.ActionAllow,
+		Action:     types.ActionAllow,
 	}, nil
 }
 
@@ -210,12 +226,12 @@ func (p *DetectionPipeline) ExecuteStreamWithBuffer(ctx context.Context, accumul
 	}
 
 	return &types.DetectionResult{
-		Tier:      types.Tier1Regex,
-		Detector:  "pipeline",
-		Category:  types.CategoryOther,
-		Severity:  types.SeverityLow,
-		Matched:   false,
+		Tier:       types.Tier1Regex,
+		Detector:   "pipeline",
+		Category:   types.CategoryOther,
+		Severity:   types.SeverityLow,
+		Matched:    false,
 		Confidence: 0,
-		Action:    types.ActionAllow,
+		Action:     types.ActionAllow,
 	}, nil
 }

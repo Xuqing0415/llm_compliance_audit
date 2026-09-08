@@ -42,14 +42,32 @@ func (fw *FileWatcher) Watch(path string, callback func()) error {
 					return
 				}
 
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) {
-					now := time.Now()
-					if now.Sub(lastEventTime) > time.Second {
-						lastEventTime = now
-						logrus.Info("Config file changed, triggering reload...")
-						callback()
-					}
+				relevant := event.Has(fsnotify.Write) || event.Has(fsnotify.Create) ||
+					event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename)
+				if !relevant {
+					continue
 				}
+
+				now := time.Now()
+				if now.Sub(lastEventTime) <= time.Second {
+					// Coalesce the burst of events editors produce on save.
+					continue
+				}
+				lastEventTime = now
+
+				// Editors that save via write-temp + rename (vim, many IDEs)
+				// replace the watched inode; re-establish the watch so hot
+				// reload keeps working afterwards.
+				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
+					time.AfterFunc(200*time.Millisecond, func() {
+						if err := fw.watcher.Add(path); err != nil {
+							logrus.Warn("Failed to re-add file to watcher:", path, err)
+						}
+					})
+				}
+
+				logrus.Info("Config file changed, triggering reload...")
+				callback()
 			case err, ok := <-fw.watcher.Errors:
 				if !ok {
 					return

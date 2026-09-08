@@ -17,6 +17,7 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /app/llm-audit-gateway .
 COPY --from=builder /app/configs/config.yaml ./configs/config.yaml
+COPY --from=builder /app/configs/exemptions.yaml ./configs/exemptions.yaml
 
 RUN mkdir -p /app/logs/audit
 
