@@ -4,6 +4,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Release](https://img.shields.io/github/v/release/Xuqing0415/llm_compliance_audit)](https://github.com/Xuqing0415/llm_compliance_audit/releases)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 面向 LLM/OpenAI 兼容服务的合规审计反向代理：在模型 API 前加一层网关，对进出流量做**敏感数据出境**、**提示词注入**、**命令/SQL 注入**、**批量导出**检测，并把拦截与放行过程记录成**防篡改审计日志**。
 
