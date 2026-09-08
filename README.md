@@ -92,7 +92,7 @@ go test ./...          # 含 internal/smoke 回归套件
 - **Tier 2 PII 识别引擎落地**：当前 `internal/detector/tier2_pii.go` 为占位实现（默认关闭），v0.2.0 计划接入真实 PII 识别并保留现有开关语义。
 - **审计输出 Kafka sink**：`configs/config.yaml` 已预留 `audit.storage_type: kafka` 配置位，替代本地 `file` 存储，支撑多副本/高吞吐。
 - **Prometheus 告警规则示例**：随仓库提供 `alerts.yml`，覆盖拦截量突增、审计写盘失败、磁盘水位等关键信号。
-- **生产部署实战文档**：K8s 模板、Grafana 面板、误报回收定时任务（见 `docs/`，规划中）。
+- **生产部署实战文档**：已提供 [docs/production-deployment-guide.md](docs/production-deployment-guide.md)（K8s 模板、灰度放量、误报回收 CronJob、排障清单）；Grafana 面板 JSON 仍规划中。
 - **Tier 3 语义检测（可选开关）**：仅在社区反馈「Tier1+Tier2 不够用」时推进。
 
 ## 目录结构
