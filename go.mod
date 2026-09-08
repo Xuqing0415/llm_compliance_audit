@@ -1,9 +1,9 @@
 module llm-audit-gateway
 
-go 1.22
+go 1.23
 
 require (
-	github.com/fsnotify/fsnotify v1.7.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/goccy/go-yaml v1.11.2
 	github.com/google/uuid v1.6.0
