@@ -56,4 +56,4 @@ body:
     attributes:
       label: 环境
       description: OS / Go 版本 / 部署方式
-      placeholder: Windows 11 / go1.22 / docker compose
+      placeholder: Windows 11 / go1.25 / docker compose

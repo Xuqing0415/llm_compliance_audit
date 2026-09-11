@@ -78,49 +78,164 @@ metadata:
   name: llm-audit-gateway-config
 data:
   config.yaml: |
+    # 本文件与仓库 configs/config.yaml 保持同步（k8s 仅替换 upstream.url 与 Authorization）。
+    # 说明：以下字段当前版本已声明但尚未被代码消费（预留，计划 v0.2.0 实现），
+    # 修改它们不会生效：server.write_timeout、upstream.timeout、
+    # audit.max_log_file_size_mb、detection.export_batch_threshold、
+    # detection.policy_guard、monitoring.prometheus_url。
     server:
       host: "0.0.0.0"
       port: 8080
-      read_timeout: 60
-      write_timeout: 60
+      admin_port: 9090
+      # 管理接口鉴权：留空表示仅本机(loopback)可访问；生产建议设置随机 token，
+      # 调用管理接口时通过 X-Admin-Token 请求头携带。
+      admin_token: ""
+      read_timeout: 30
+      write_timeout: 30
       max_request_body_size: 10485760
 
     upstream:
       url: "http://llm-service.default.svc.cluster.local:8000/v1"
       timeout: 60
       max_connections: 100
+      request_headers:
+        Authorization: "Bearer REPLACE_WITH_REAL_KEY"
 
     audit:
       enabled: true
       storage_type: "file"
+      kafka_brokers:
+        - "localhost:9092"
+      kafka_topic: "llm-audit-logs"
+      clickhouse_dsn: "tcp://localhost:9000/default"
+      oss_bucket: ""
       log_retention_days: 90
+      max_disk_usage_percent: 85
+      max_log_file_size_mb: 100
+      audit_sampling_rate: 0.1
 
     detection:
       tier1_enabled: true
       tier2_enabled: false
       tier3_enabled: false
+      audit_only_mode: false
+      max_detection_length: 2000
+      stream:
+        window_max_size: 500
+        window_flush_threshold: 50
+        max_delay_ms: 300
       regex_rules:
         - name: "身份证号"
           pattern: "[1-9]\\d{5}(18|19|20)\\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\\d|3[01])\\d{3}[\\dXx]"
           category: "SENSITIVE_DATA"
           severity: "HIGH"
           action: "BLOCK"
+          description: "中国身份证号正则"
         - name: "手机号"
           pattern: "1[3-9]\\d{9}"
           category: "SENSITIVE_DATA"
           severity: "MEDIUM"
           action: "BLOCK"
+          description: "中国手机号正则"
         - name: "邮箱"
           pattern: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
           category: "SENSITIVE_DATA"
           severity: "MEDIUM"
           action: "BLOCK"
+          description: "邮箱地址正则"
+        - name: "银行卡号"
+          pattern: "\\b\\d{16,19}\\b"
+          category: "SENSITIVE_DATA"
+          severity: "HIGH"
+          action: "BLOCK"
+          description: "银行卡号正则"
+        - name: "IP地址"
+          pattern: "\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b"
+          category: "OTHER"
+          severity: "LOW"
+          action: "ALERT"
+          description: "IPv4地址正则"
+        - name: "URL"
+          pattern: "https?://[\\w\\-._~:/?#[\\]@!$&'()*+,;=%]+"
+          category: "OTHER"
+          severity: "LOW"
+          action: "ALERT"
+          description: "URL地址正则"
+        - name: "命令注入"
+          pattern: "(?i)(?:[;|&`]|\\$\\(|\\b(?:run|execute|exec|启动|执行)\\s+)\\s*\\b(?:rm|cat|ls|curl|wget|chmod|chown|mkdir|rmdir|nc|ncat|bash|sh|zsh|python|perl|powershell|cmd)\\b"
+          category: "MALICIOUS"
+          severity: "CRITICAL"
+          action: "BLOCK"
+          description: "命令注入检测"
+        - name: "SQL注入"
+          pattern: "(?:(?:')(?:AND|OR)\\s+\\d+=\\d+|UNION\\s+SELECT|DROP\\s+TABLE|INSERT\\s+INTO)"
+          category: "MALICIOUS"
+          severity: "CRITICAL"
+          action: "BLOCK"
+          description: "SQL注入检测"
+        - name: "全库导出"
+          pattern: "(?i)export\\s*(?:all\\s+table|full\\s+databas|entire\\s+collect)"
+          category: "MALICIOUS"
+          severity: "CRITICAL"
+          action: "ALERT"
+          description: "全库导出高危指令（影子模式，灰度观察期）"
+        - name: "批量超阈值"
+          pattern: "(?i)(?:export|download|extract).*(?:limit|count|size)\\s*[>:]\\s*(?:[\\d,]+k|\\d{4,})"
+          category: "MALICIOUS"
+          severity: "HIGH"
+          action: "ALERT"
+          description: "批量导出超阈值（影子模式，灰度观察期）"
+        - name: "密钥泄露导出"
+          pattern: "(?i)(?:secret_key|access_token|password|api_key)\\s*=.*(?:export|dump|download)"
+          category: "MALICIOUS"
+          severity: "CRITICAL"
+          action: "ALERT"
+          description: "密钥信息泄露导出（影子模式，灰度观察期）"
       parallel_detection: true
       fail_open: true
+      export_batch_threshold: 1000
+      execution_policies:
+        - name: "高危导出策略"
+          header_key: "X-Export-Scope"
+          header_values:
+            - "full-db"
+            - "full_db"
+            - "high-risk"
+          mode: "force_block"
+          priority: 10
+        - name: "常规导出策略"
+          header_key: "X-Export-Scope"
+          header_values:
+            - "summary"
+            - "report"
+            - "low-risk"
+          mode: "force_audit"
+          priority: 5
+      policy_guard:
+        auto_enable_block: false
+        min_samples_for_auto: 100
+        high_risk_rule_names:
+          - "全库导出"
+          - "密钥泄露导出"
+          - "批量超阈值"
+      path_purpose_mappings:
+        - pattern: "v1/export/batch"
+          purpose: "export-batch"
+        - pattern: "v1/report/generate"
+          purpose: "export-batch"
+        - pattern: "v1/report/export"
+          purpose: "export-batch"
+        - pattern: "v1/data/export"
+          purpose: "export-batch"
+        - pattern: "v1/admin/download"
+          purpose: "export-batch"
+        - pattern: "v1/export"
+          purpose: "export"
 
     monitoring:
       enabled: true
       metrics_port: 9090
+      prometheus_url: ""
 ---
 apiVersion: v1
 kind: Service

@@ -1,3 +1,7 @@
+# 说明：以下字段当前版本已声明但尚未被代码消费（预留，计划 v0.2.0 实现），
+# 修改它们不会生效：server.write_timeout、upstream.timeout、
+# audit.max_log_file_size_mb、detection.export_batch_threshold、
+# detection.policy_guard、monitoring.prometheus_url。
 server:
   host: "0.0.0.0"
   port: 8080

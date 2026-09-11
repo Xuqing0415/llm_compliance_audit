@@ -9,18 +9,18 @@ import (
 )
 
 type LatencyRecord struct {
-	Duration time.Duration
+	Duration  time.Duration
 	Timestamp time.Time
 }
 
 type DetectorStats struct {
-	Name           string
-	TotalCount     int64
-	MatchCount     int64
-	Latencies      []time.Duration
-	MaxLatency     time.Duration
-	MinLatency     time.Duration
-	TotalLatency   time.Duration
+	Name         string
+	TotalCount   int64
+	MatchCount   int64
+	Latencies    []time.Duration
+	MaxLatency   time.Duration
+	MinLatency   time.Duration
+	TotalLatency time.Duration
 }
 
 type StatsCollector struct {
@@ -47,10 +47,10 @@ func (sc *StatsCollector) RecordLatency(detectorName string, duration time.Durat
 
 	if _, ok := sc.detectorStats[detectorName]; !ok {
 		sc.detectorStats[detectorName] = &DetectorStats{
-			Name:         detectorName,
-			Latencies:    make([]time.Duration, 0),
-			MaxLatency:   0,
-			MinLatency:   time.Hour,
+			Name:       detectorName,
+			Latencies:  make([]time.Duration, 0),
+			MaxLatency: 0,
+			MinLatency: time.Hour,
 		}
 	}
 
@@ -117,13 +117,13 @@ func (sc *StatsCollector) GetAllStats() map[string]*DetectorStats {
 
 func (sc *StatsCollector) copyStats(stats *DetectorStats) *DetectorStats {
 	return &DetectorStats{
-		Name:           stats.Name,
-		TotalCount:     stats.TotalCount,
-		MatchCount:     stats.MatchCount,
-		Latencies:      append([]time.Duration(nil), stats.Latencies...),
-		MaxLatency:     stats.MaxLatency,
-		MinLatency:     stats.MinLatency,
-		TotalLatency:   stats.TotalLatency,
+		Name:         stats.Name,
+		TotalCount:   stats.TotalCount,
+		MatchCount:   stats.MatchCount,
+		Latencies:    append([]time.Duration(nil), stats.Latencies...),
+		MaxLatency:   stats.MaxLatency,
+		MinLatency:   stats.MinLatency,
+		TotalLatency: stats.TotalLatency,
 	}
 }
 
