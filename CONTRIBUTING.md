@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- Go 1.22+（见 `go.mod`）
+- Go 1.25+（见 `go.mod`）
 - 上游需要一个 OpenAI 兼容的服务用于联调；`configs/config.yaml` 中 `upstream.url` 与 `Authorization` 请改为本地/测试值
 - 无需外部数据库：审计默认 `file` 存储，日志落在 `logs/audit/`（已被 `.gitignore` 排除）
 

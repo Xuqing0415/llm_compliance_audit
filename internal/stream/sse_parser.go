@@ -12,9 +12,9 @@ import (
 )
 
 type SSEEvent struct {
-	Data string
+	Data  string
 	Event string
-	ID string
+	ID    string
 	Retry int
 }
 
@@ -78,8 +78,8 @@ type ContentDelta struct {
 }
 
 type ChoiceDelta struct {
-	Delta ContentDelta `json:"delta"`
-	FinishReason string `json:"finish_reason"`
+	Delta        ContentDelta `json:"delta"`
+	FinishReason string       `json:"finish_reason"`
 }
 
 type SSEPayload struct {

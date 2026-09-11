@@ -1,0 +1,16 @@
+# Local state and build artifacts that must not enter the build context or the
+# image. configs/ is intentionally NOT listed: the Dockerfile copies
+# configs/config.yaml and configs/exemptions.yaml into the runtime image.
+.git
+.gitignore
+.github
+.idea
+.vscode
+.gocache
+.gotmp
+.workbuddy
+logs
+*.exe
+*.log
+REPORT.md
+deploy/k8s

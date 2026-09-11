@@ -5,40 +5,40 @@ import "time"
 type Action string
 
 const (
-	ActionAllow              Action = "ALLOW"
-	ActionBlock              Action = "BLOCK"
-	ActionAlert              Action = "ALERT"
-	ActionRedact             Action = "REDACT"
-	ActionReplace            Action = "REPLACE"
+	ActionAllow                  Action = "ALLOW"
+	ActionBlock                  Action = "BLOCK"
+	ActionAlert                  Action = "ALERT"
+	ActionRedact                 Action = "REDACT"
+	ActionReplace                Action = "REPLACE"
 	ActionPassThroughWithWarning Action = "PASS_THROUGH_WITH_WARNING"
 )
 
 type DetectionTier string
 
 const (
-	Tier1Regex  DetectionTier = "TIER1_REGEX"
-	Tier2PII    DetectionTier = "TIER2_PII"
+	Tier1Regex    DetectionTier = "TIER1_REGEX"
+	Tier2PII      DetectionTier = "TIER2_PII"
 	Tier3Semantic DetectionTier = "TIER3_SEMANTIC"
 )
 
 type DetectionSeverity string
 
 const (
-	SeverityLow    DetectionSeverity = "LOW"
-	SeverityMedium DetectionSeverity = "MEDIUM"
-	SeverityHigh   DetectionSeverity = "HIGH"
+	SeverityLow      DetectionSeverity = "LOW"
+	SeverityMedium   DetectionSeverity = "MEDIUM"
+	SeverityHigh     DetectionSeverity = "HIGH"
 	SeverityCritical DetectionSeverity = "CRITICAL"
 )
 
 type DetectionCategory string
 
 const (
-	CategorySensitiveData DetectionCategory = "SENSITIVE_DATA"
-	CategoryPII          DetectionCategory = "PII"
+	CategorySensitiveData   DetectionCategory = "SENSITIVE_DATA"
+	CategoryPII             DetectionCategory = "PII"
 	CategoryPromptInjection DetectionCategory = "PROMPT_INJECTION"
-	CategoryMalicious    DetectionCategory = "MALICIOUS"
-	CategoryCompliance   DetectionCategory = "COMPLIANCE"
-	CategoryOther        DetectionCategory = "OTHER"
+	CategoryMalicious       DetectionCategory = "MALICIOUS"
+	CategoryCompliance      DetectionCategory = "COMPLIANCE"
+	CategoryOther           DetectionCategory = "OTHER"
 )
 
 type DetectionResult struct {
@@ -74,9 +74,9 @@ const (
 )
 
 type ExecutionPolicy struct {
-	Name         string                `yaml:"name"`
-	HeaderKey    string                `yaml:"header_key"`
-	HeaderValues []string              `yaml:"header_values"`
-	Mode         ExecutionPolicyMode   `yaml:"mode"`
-	Priority     int                   `yaml:"priority"`
+	Name         string              `yaml:"name"`
+	HeaderKey    string              `yaml:"header_key"`
+	HeaderValues []string            `yaml:"header_values"`
+	Mode         ExecutionPolicyMode `yaml:"mode"`
+	Priority     int                 `yaml:"priority"`
 }

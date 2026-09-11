@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -7,9 +7,11 @@ RUN go mod download
 
 COPY . .
 
-RUN go build -o llm-audit-gateway cmd/gateway/main.go
+# CGO_ENABLED=0 keeps the binary static so the minimal alpine runtime needs no
+# libc and the build does not depend on a C compiler being present.
+RUN CGO_ENABLED=0 go build -o llm-audit-gateway cmd/gateway/main.go
 
-FROM alpine:3.19
+FROM alpine:3.22
 
 WORKDIR /app
 

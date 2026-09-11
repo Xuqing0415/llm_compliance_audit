@@ -66,7 +66,7 @@
 
 ## 3. 镜像构建
 
-仓库内 `deploy/docker/Dockerfile` 为多阶段构建（golang:1.22-alpine 编译 → alpine:3.19 运行）。
+仓库内 `deploy/docker/Dockerfile` 为多阶段构建（golang:1.25-alpine 编译 → alpine:3.22 运行）。
 
 ```bash
 # 本地验证
@@ -86,7 +86,7 @@ docker push registry.example.com/llm-audit-gateway:v0.1.0
 `deploy/k8s/deployment.yaml` 已包含：Deployment（replicas=1、探针、资源限额）、config ConfigMap、exemptions ConfigMap、PVC（10Gi，RWO）、HPA（钉在 1 副本）。**上手前必改**：
 
 1. `image: llm-audit-gateway:latest` → 你推的 registry 镜像 + 版本 tag。
-2. ConfigMap `llm-audit-gateway-config` 里的 `config.yaml` 内容要与仓库 `configs/config.yaml` **保持同步**（含新增的 `admin_token` 字段），并显式设置 `admin_token`（留空时管理接口只能从 Pod 内 loopback 访问，运维等于不可用）。
+2. ConfigMap `llm-audit-gateway-config` 的 `config.yaml` 已与仓库 `configs/config.yaml` 同步（仅 `upstream.url`、`Authorization` 不同）；后续改动仓库配置时记得同步此 ConfigMap。**务必显式设置 `admin_token`**（留空时管理接口只能从 Pod 内 loopback 访问，运维等于不可用）。
 3. ConfigMap 里 `upstream.url` / `Authorization` 替换为真实上游与密钥（生产建议改用 Secret 卷挂载 `config.yaml` 或启动时注入）。
 
 ```bash
@@ -96,7 +96,7 @@ kubectl rollout status deployment/llm-audit-gateway
 
 ### 4.2 Service 与入口
 
-deployment.yaml 未附带 Service，按需创建：
+deployment.yaml 已附带 Service（ClusterIP，端口 `8080/http`、`9090/metrics`）与 HPA，`kubectl apply` 后即可用，无需另建。若要改用 NodePort/Ingress 暴露，可参考下面这份等价定义自行扩展：
 
 ```yaml
 apiVersion: v1

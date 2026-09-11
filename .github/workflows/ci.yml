@@ -20,3 +20,20 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Format check
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        # Verifies the Dockerfile base image actually matches go.mod, so the
+        # Go version can no longer drift unnoticed.
+        run: docker build -f deploy/docker/Dockerfile -t llm-audit-gateway:ci .

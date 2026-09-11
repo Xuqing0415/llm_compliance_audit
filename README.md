@@ -2,7 +2,7 @@
 
 > **Status**: v0.1.0 · 首个公开版。代码与文档已冻结，可试用；生产接入前请逐项对照 [SECURITY.md](SECURITY.md) 部署清单。
 
-[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Release](https://img.shields.io/github/v/release/Xuqing0415/llm_compliance_audit)](https://github.com/Xuqing0415/llm_compliance_audit/releases)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-环境要求：Go 1.22+，目标服务为 OpenAI 兼容 HTTP API。
+环境要求：Go 1.25+（见 `go.mod`），目标服务为 OpenAI 兼容 HTTP API。
 
 ```bash
 # 1. 构建
@@ -85,6 +85,7 @@ go test ./...          # 含 internal/smoke 回归套件
 - **tier2 PII 识别与 tier3 语义检测为占位实现**（默认关闭 `tier2_enabled`/`tier3_enabled`），当前能力以 tier1 正则为主。
 - 审计默认 `file` 存储、适合单实例；多副本/高吞吐需接入集中式存储（kafka 适配目前未落地），见 [SECURITY.md](SECURITY.md) 部署清单。
 - 命令/SQL 注入等正则规则存在误报可能，上线建议先 `audit_only_mode: true` 灰度观察（配置见 `configs/config.yaml`，辅助脚本见 `scripts/analyze_false_positives.ps1`）。
+- **部分配置项为预留字段**：`server.write_timeout`、`upstream.timeout`、`audit.max_log_file_size_mb`、`detection.export_batch_threshold`、`detection.policy_guard`、`monitoring.prometheus_url` 当前未被代码消费，改动不会生效（`configs/config.yaml` 顶部有同样说明），计划在 v0.2.0 落实。
 
 ## Roadmap（v0.2.0 方向）
 
