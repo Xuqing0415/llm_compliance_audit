@@ -66,7 +66,7 @@
 
 ## 3. 镜像构建
 
-仓库内 `deploy/docker/Dockerfile` 为多阶段构建（golang:1.25-alpine 编译 → alpine:3.22 运行）。
+仓库内 `deploy/docker/Dockerfile` 为多阶段构建（golang:1.26-alpine 编译 → alpine:3.22 运行）。
 
 ```bash
 # 本地验证

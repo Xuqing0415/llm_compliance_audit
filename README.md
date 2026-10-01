@@ -2,7 +2,7 @@
 
 > **Status**: v0.1.0 · 首个公开版。代码与文档已冻结，可试用；生产接入前请逐项对照 [SECURITY.md](SECURITY.md) 部署清单。
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Release](https://img.shields.io/github/v/release/Xuqing0415/llm_compliance_audit)](https://github.com/Xuqing0415/llm_compliance_audit/releases)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-环境要求：Go 1.25+（见 `go.mod`），目标服务为 OpenAI 兼容 HTTP API。
+环境要求：Go 1.26+（见 `go.mod`），目标服务为 OpenAI 兼容 HTTP API。
 
 ```bash
 # 1. 构建

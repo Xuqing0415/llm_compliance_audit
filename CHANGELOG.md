@@ -2,6 +2,11 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+- 依赖升级：`golang.org/x/sys` v0.47.0 → v0.48.0。该版本自带 `go 1.26.0` 要求，项目 Go 基线随之上调（`go.mod`、Dockerfile 构建镜像、文档同步更新）。
+- 复查遗留修复：Dockerfile 基础镜像与 `go.mod` 对齐、新增 `.dockerignore`（避免 `.gocache`/`.git`/`REPORT.md` 进入镜像）、k8s ConfigMap 与 `configs/config.yaml` 全量同步、7 个历史文件 gofmt 归位、CI 增加 gofmt 与镜像构建检查。
+
 ## [v0.1.0] - 2026-09-08
 
 首个公开版本。本版基于一轮完整源码安全审查（拦截先于泄露、鉴权可伪造、审计可篡改等），修复清单如下。
