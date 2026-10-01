@@ -1,0 +1,12 @@
+# Normalize line endings to LF in the working tree so tools like gofmt and git
+# agree regardless of platform or core.autocrlf. Git already stores these files
+# as LF; this makes Windows checkouts match instead of converting to CRLF.
+* text=auto eol=lf
+
+# Binary assets are never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
